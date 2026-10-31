@@ -46,6 +46,7 @@ SPEED_UP_PER_HIT = 0.25    # the ball gets a little faster on every paddle hit
 POWER_MULTIPLIER = 1.4     # extra speed from a power shot
 POWER_COOLDOWN_MS = 3000   # how long before a power shot can be used again
 SERVE_DELAY_MS = 1000      # pause before the ball is served
+BANNER_MS = 1200           # how long a scoring message stays on screen
 
 BRICK_POINTS = 1
 CORE_POINTS = 5
@@ -170,6 +171,9 @@ class Game:
         self.menu_error = ""
         self.save_message = ""
         self.winner = ""
+        self.banner_text = ""     # big message such as "CORE HIT! +5"
+        self.banner_color = WHITE
+        self.banner_until = 0     # time (ms) when the banner disappears
         self.new_match()
 
     @staticmethod
@@ -210,12 +214,20 @@ class Game:
         self.right_paddle.reset()
         self.winner = ""
         self.save_message = ""
+        self.banner_until = 0
         self.start_serve(random.choice([-1, 1]))
 
     def start_serve(self, direction):
         """Freeze the ball in the center, then serve after a short delay."""
         self.ball.serve(direction)
         self.serve_time = pygame.time.get_ticks() + SERVE_DELAY_MS
+
+    def show_banner(self, text, color, duration=BANNER_MS):
+        """Flash a message in the middle of the field so players see why
+        the score changed."""
+        self.banner_text = text
+        self.banner_color = color
+        self.banner_until = pygame.time.get_ticks() + duration
 
     # ------------------------------------------------------------------
     # Input
@@ -297,6 +309,7 @@ class Game:
             new_speed *= POWER_MULTIPLIER
             paddle.last_power_time = now
             self.ball.powered = True
+            self.show_banner("POWER SHOT!", POWER_COLOR, 700)
 
         self.ball.set_speed(new_speed)
 
@@ -355,9 +368,11 @@ class Game:
         # Core hits: the ball reached the far edge behind a wall
         if ball.rect.left <= CORE_WIDTH:
             self.right_score += CORE_POINTS
+            self.show_banner(f"CORE HIT!  Right +{CORE_POINTS}", RIGHT_COLOR)
             self.start_serve(-1)      # serve toward the player who was hit
         elif ball.rect.right >= WIDTH - CORE_WIDTH:
             self.left_score += CORE_POINTS
+            self.show_banner(f"CORE HIT!  Left +{CORE_POINTS}", LEFT_COLOR)
             self.start_serve(1)
 
         self.check_winner()
@@ -438,6 +453,18 @@ class Game:
         self.draw_power_meter(self.left_paddle, WIDTH // 4)
         self.draw_power_meter(self.right_paddle, WIDTH * 3 // 4)
 
+        # Messages: "Get ready" before a serve, and the latest scoring banner.
+        # Hidden on the pause and game-over screens so they don't clutter them.
+        if self.state != "playing":
+            return
+        now = pygame.time.get_ticks()
+        if now < self.serve_time:
+            self.draw_text("Get ready...", self.small_font, GRAY,
+                           (WIDTH // 2, HEIGHT // 2 + 40))
+        if now < self.banner_until:
+            self.draw_text(self.banner_text, self.font, self.banner_color,
+                           (WIDTH // 2, HEIGHT // 2 - 60))
+
     def draw_menu(self):
         """Title screen with controls and the target score input."""
         self.screen.fill(BACKGROUND)
@@ -449,7 +476,8 @@ class Game:
                        self.small_font, LEFT_COLOR, (WIDTH // 2, 250))
         self.draw_text("Right:  Up / Down move,  hold Left arrow for a power shot",
                        self.small_font, RIGHT_COLOR, (WIDTH // 2, 280))
-        self.draw_text("P pauses,  Esc quits", self.small_font, GRAY,
+        self.draw_text("P pauses and shows the rules,  Esc quits",
+                       self.small_font, GRAY,
                        (WIDTH // 2, 310))
 
         self.draw_text(f"Target score: {self.target_text}_", self.font, WHITE,
@@ -464,7 +492,7 @@ class Game:
     def draw_overlay(self, title, lines):
         """Darken the field and show a message box on top of it."""
         shade = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        shade.fill((0, 0, 0, 170))
+        shade.fill((0, 0, 0, 215))
         self.screen.blit(shade, (0, 0))
         self.draw_text(title, self.big_font, WHITE, (WIDTH // 2, HEIGHT // 2 - 60))
         for index, line in enumerate(lines):
@@ -478,7 +506,15 @@ class Game:
         else:
             self.draw_field()
             if self.state == "paused":
-                self.draw_overlay("PAUSED", ["Press P to resume"])
+                self.draw_overlay("PAUSED", [
+                    f"Smash a brick: +{BRICK_POINTS}     Hit the core: "
+                    f"+{CORE_POINTS}     First to {self.target_score} wins",
+                    "Left: W / S, hold D for a power shot",
+                    "Right: Up / Down, hold Left arrow for a power shot",
+                    f"Power shots recharge in {POWER_COOLDOWN_MS // 1000} seconds "
+                    "(yellow bar = ready)",
+                    "Press P to resume,  Esc to quit",
+                ])
             elif self.state == "game_over":
                 self.draw_overlay(f"{self.winner} wins!", [
                     f"Final score  {self.left_score} - {self.right_score}",
